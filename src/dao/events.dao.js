@@ -1,7 +1,9 @@
 /**
  * DAO: acceso directo al modelo de Mongoose para la colección de eventos.
  */
-import Event from '../models/Event.js';
+import Event, { EVENT_STATUSES } from '../models/Event.js';
+
+export { EVENT_STATUSES };
 
 export const create = async (eventData) => {
     return Event.create(eventData);

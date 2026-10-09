@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import ticketsRepository from '../repositories/tickets.repository.js';
 import eventsRepository from '../repositories/events.repository.js';
+import usersRepository from '../repositories/users.repository.js';
 import mailer from '../utils/mailer.js';
 import ticketsService from './tickets.service.js';
 
@@ -185,13 +186,51 @@ describe('tickets.service - cancelTicket', () => {
         );
     });
 
-    test('admin puede cancelar el ticket de cualquier usuario', async (t) => {
-        t.mock.method(ticketsRepository, 'getTicketById', async () => buildFakeTicket({ user: new mongoose.Types.ObjectId().toString() }));
-        t.mock.method(ticketsRepository, 'updateTicket', async (id, updates) => buildFakeTicket(updates));
+    test('admin puede cancelar el ticket de cualquier usuario y notificar por email', async (t) => {
+        const ownerId = new mongoose.Types.ObjectId().toString();
+        const fakeTicket = buildFakeTicket({ user: ownerId });
+        t.mock.method(ticketsRepository, 'getTicketById', async () => fakeTicket);
+        t.mock.method(ticketsRepository, 'updateTicket', async (id, updates) => buildFakeTicket({ ...updates, user: ownerId }));
+        t.mock.method(usersRepository, 'getUserById', async () => ({ email: 'owner@mail.com' }));
+        t.mock.method(eventsRepository, 'getEventById', async () => buildFakeEvent({ title: 'Torneo Pro' }));
+        let mailSentTo = null;
+        let mailData = null;
+        t.mock.method(mailer, 'sendTicketCancellationEmail', async (to, data) => {
+            mailSentTo = to;
+            mailData = data;
+            return { sent: true };
+        });
 
-        const result = await ticketsService.cancelTicket(new mongoose.Types.ObjectId().toString(), ADMIN);
+        const result = await ticketsService.cancelTicket(fakeTicket._id.toString(), ADMIN);
         assert.equal(result.status, 'cancelled');
         assert.ok(result.cancelledAt);
+        assert.equal(mailSentTo, 'owner@mail.com');
+        assert.equal(mailData.eventTitle, 'Torneo Pro');
+    });
+
+    test('cancela el ticket propio y envía el email de cancelación', async (t) => {
+        const fakeTicket = buildFakeTicket({ user: USER.id });
+        t.mock.method(ticketsRepository, 'getTicketById', async () => fakeTicket);
+        t.mock.method(ticketsRepository, 'updateTicket', async (id, updates) => buildFakeTicket(updates));
+        t.mock.method(eventsRepository, 'getEventById', async () => buildFakeEvent({ title: 'Maratón' }));
+        const mailMock = t.mock.method(mailer, 'sendTicketCancellationEmail', async () => ({ sent: true }));
+
+        const result = await ticketsService.cancelTicket(fakeTicket._id.toString(), USER);
+        assert.equal(result.status, 'cancelled');
+        assert.equal(mailMock.mock.callCount(), 1);
+    });
+
+    test('la cancelación no falla aunque el envío del email falle', async (t) => {
+        const fakeTicket = buildFakeTicket({ user: USER.id });
+        t.mock.method(ticketsRepository, 'getTicketById', async () => fakeTicket);
+        t.mock.method(ticketsRepository, 'updateTicket', async (id, updates) => buildFakeTicket(updates));
+        t.mock.method(eventsRepository, 'getEventById', async () => buildFakeEvent());
+        t.mock.method(mailer, 'sendTicketCancellationEmail', async () => {
+            throw new Error('SMTP error');
+        });
+
+        const result = await ticketsService.cancelTicket(fakeTicket._id.toString(), USER);
+        assert.equal(result.status, 'cancelled');
     });
 
     test('no permite cancelar un ticket ya cancelado', async (t) => {

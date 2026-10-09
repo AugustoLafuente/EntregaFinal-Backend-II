@@ -10,17 +10,10 @@ import usersRepository from '../repositories/users.repository.js';
 import { hashPassword, comparePassword } from '../utils/hash.js';
 import { config, COOKIE_NAME } from './config.js';
 import AppError from '../utils/AppError.js';
+import { toUserDTO } from '../dtos/user.dto.js';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
-
-const toSafeUser = (user) => ({
-    id: user._id,
-    first_name: user.first_name,
-    last_name: user.last_name,
-    email: user.email,
-    role: user.role
-});
 
 // Extrae el JWT desde la cookie httpOnly en lugar del header Authorization.
 const cookieExtractor = (req) => req?.cookies?.[COOKIE_NAME] || null;
@@ -68,7 +61,7 @@ const initializePassport = () => {
                         // role no se acepta desde el body: siempre queda el valor por defecto del modelo
                     });
 
-                    return done(null, toSafeUser(newUser));
+                    return done(null, toUserDTO(newUser));
                 } catch (error) {
                     return done(error);
                 }
@@ -97,7 +90,7 @@ const initializePassport = () => {
                         return done(null, false);
                     }
 
-                    return done(null, toSafeUser(user));
+                    return done(null, toUserDTO(user));
                 } catch (error) {
                     return done(error);
                 }

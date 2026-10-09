@@ -2,10 +2,10 @@
  * Lógica de negocio para la creación, consulta, modificación y cambio de
  * estado de eventos.
  */
-import mongoose from 'mongoose';
-import eventsRepository from '../repositories/events.repository.js';
-import { EVENT_STATUSES } from '../models/Event.js';
+import eventsRepository, { EVENT_STATUSES } from '../repositories/events.repository.js';
+import { toEventDTO } from '../dtos/event.dto.js';
 import AppError from '../utils/AppError.js';
+import isValidObjectId from '../utils/isValidObjectId.js';
 
 const REQUIRED_CREATE_FIELDS = ['title', 'description', 'category', 'location'];
 const UPDATABLE_FIELDS = ['title', 'description', 'category', 'date', 'location', 'capacity', 'price', 'sport_type'];
@@ -14,20 +14,6 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 // Un evento cancelado es un estado terminal: no se puede editar ni transicionar a otro estado.
 const TERMINAL_STATUSES = ['cancelled'];
-
-const toEventDTO = (event) => ({
-    id: event._id,
-    title: event.title,
-    description: event.description,
-    sport_type: event.sport_type,
-    category: event.category,
-    date: event.date,
-    location: event.location,
-    capacity: event.capacity,
-    price: event.price,
-    status: event.status,
-    organizer: event.organizer
-});
 
 const parseDate = (value, fieldErrorMessage) => {
     const parsed = new Date(value);
@@ -38,7 +24,7 @@ const parseDate = (value, fieldErrorMessage) => {
 };
 
 const getOwnedEventOrThrow = async (eventId, user) => {
-    if (!mongoose.isValidObjectId(eventId)) {
+    if (!isValidObjectId(eventId)) {
         throw new AppError('Evento no encontrado', 404);
     }
 
@@ -95,7 +81,7 @@ export const listEvents = async (query = {}) => {
 };
 
 export const getEventById = async (eventId) => {
-    if (!mongoose.isValidObjectId(eventId)) {
+    if (!isValidObjectId(eventId)) {
         throw new AppError('Evento no encontrado', 404);
     }
 

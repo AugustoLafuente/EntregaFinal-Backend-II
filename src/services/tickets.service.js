@@ -2,25 +2,16 @@
  * Lógica de negocio para la creación, consulta y cancelación de tickets
  * (inscripciones a eventos con control de cupos).
  */
-import mongoose from 'mongoose';
 import ticketsRepository from '../repositories/tickets.repository.js';
 import eventsRepository from '../repositories/events.repository.js';
+import usersRepository from '../repositories/users.repository.js';
 import mailer from '../utils/mailer.js';
 import AppError from '../utils/AppError.js';
-
-const toTicketDTO = (ticket) => ({
-    id: ticket._id,
-    user: ticket.user,
-    event: ticket.event,
-    status: ticket.status,
-    quantity: ticket.quantity,
-    reservationCode: ticket.reservationCode,
-    createdAt: ticket.createdAt,
-    cancelledAt: ticket.cancelledAt
-});
+import isValidObjectId from '../utils/isValidObjectId.js';
+import { toTicketDTO, toTicketWithEventDTO, toTicketWithUserDTO } from '../dtos/ticket.dto.js';
 
 const getEventOrThrow = async (eventId) => {
-    if (!mongoose.isValidObjectId(eventId)) {
+    if (!isValidObjectId(eventId)) {
         throw new AppError('Evento no encontrado', 404);
     }
 
@@ -85,20 +76,7 @@ export const createTicket = async (eventId, user, requestedQuantity) => {
 
 export const listMyTickets = async (userId) => {
     const tickets = await ticketsRepository.getTicketsByUser(userId);
-    return tickets.map((ticket) => ({
-        id: ticket._id,
-        status: ticket.status,
-        quantity: ticket.quantity,
-        reservationCode: ticket.reservationCode,
-        createdAt: ticket.createdAt,
-        cancelledAt: ticket.cancelledAt,
-        event: ticket.event && {
-            id: ticket.event._id,
-            title: ticket.event.title,
-            date: ticket.event.date,
-            location: ticket.event.location
-        }
-    }));
+    return tickets.map(toTicketWithEventDTO);
 };
 
 export const listEventTickets = async (eventId, user) => {
@@ -110,24 +88,11 @@ export const listEventTickets = async (eventId, user) => {
     }
 
     const tickets = await ticketsRepository.getTicketsByEvent(eventId);
-    return tickets.map((ticket) => ({
-        id: ticket._id,
-        status: ticket.status,
-        quantity: ticket.quantity,
-        reservationCode: ticket.reservationCode,
-        createdAt: ticket.createdAt,
-        cancelledAt: ticket.cancelledAt,
-        user: ticket.user && {
-            id: ticket.user._id,
-            first_name: ticket.user.first_name,
-            last_name: ticket.user.last_name,
-            email: ticket.user.email
-        }
-    }));
+    return tickets.map(toTicketWithUserDTO);
 };
 
 export const cancelTicket = async (ticketId, user) => {
-    if (!mongoose.isValidObjectId(ticketId)) {
+    if (!isValidObjectId(ticketId)) {
         throw new AppError('Ticket no encontrado', 404);
     }
 
@@ -149,6 +114,38 @@ export const cancelTicket = async (ticketId, user) => {
         status: 'cancelled',
         cancelledAt: new Date()
     });
+
+    // Envío de email de cancelación "best effort"
+    try {
+        let recipientEmail = isOwner && user?.email ? user.email : null;
+        if (!recipientEmail && ticket.user) {
+            const userId = ticket.user?._id || ticket.user;
+            const ticketUser = await usersRepository.getUserById(userId);
+            recipientEmail = ticketUser?.email;
+        }
+
+        let eventTitle = 'Evento';
+        let eventDate = null;
+        const eventId = ticket.event?._id || ticket.event;
+        if (eventId) {
+            const event = await eventsRepository.getEventById(eventId);
+            if (event) {
+                eventTitle = event.title || eventTitle;
+                eventDate = event.date || null;
+            }
+        }
+
+        if (recipientEmail) {
+            await mailer.sendTicketCancellationEmail(recipientEmail, {
+                eventTitle,
+                eventDate,
+                quantity: updatedTicket.quantity,
+                reservationCode: updatedTicket.reservationCode
+            });
+        }
+    } catch (error) {
+        console.error('[tickets.service] No se pudo enviar el email de cancelación:', error.message);
+    }
 
     return toTicketDTO(updatedTicket);
 };

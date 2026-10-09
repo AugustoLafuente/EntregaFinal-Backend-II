@@ -1,13 +1,47 @@
-# Plataforma de Eventos Deportivos - Pre-entrega 7
+# Plataforma de Eventos Deportivos - Pre-entrega 8
 
-Proyecto backend en Node.js y Express para la gestión e inscripción a eventos deportivos. Esta entrega implementa el **flujo completo de inscripción**: la entidad `Ticket`, control de cupos, cancelaciones y el envío de un email de confirmación con Nodemailer, todo protegido por el sistema de **roles y autorización** (`401` sin sesión, `403` sin permisos) y con las reglas de negocio en la capa de `services`.
+Proyecto backend en Node.js y Express para la gestión e inscripción a eventos deportivos. Esta entrega **refactoriza la API a una arquitectura profesional en capas** (DAO → Repository → Service → Controller, con una capa de DTO para las respuestas), sin cambiar el comportamiento externo de ningún endpoint: el registro, login, CRUD de eventos, inscripciones, cupos, permisos y notificaciones siguen funcionando exactamente igual que en la pre-entrega 7.
 
 ### ✅ Resumen de lo incorporado en esta entrega
 
-- **Entidad `Ticket`** con control de cupos, estados (`confirmed`/`pending`/`cancelled`), código de reserva y referencias (no objetos embebidos) a `User` y `Event`.
-- **Email de confirmación con Nodemailer**, credenciales siempre desde variables de entorno.
-- Reemplaza al módulo `Inscription` de la corrección anterior: `Ticket` cubre el mismo flujo secundario con el modelo y los endpoints exactos que pide esta consigna, así que `Inscription` se eliminó para no mantener dos colecciones redundantes para lo mismo.
-- Se mantiene el manejo de errores centralizado y los tests automatizados agregados en la entrega anterior, ahora extendidos a `tickets.service.js`.
+- **Capa `dtos/`**: `user.dto.js`, `event.dto.js` y `ticket.dto.js` centralizan qué campos de cada entidad se exponen en las respuestas. Reemplazan los mapeos que antes estaban duplicados dentro de cada `service` (y en `passport.config.js` para el usuario). `password` nunca se expone, tampoco cuando el documento viene con `populate`.
+- **`users.service.js`**: antes `users.controller.js` llamaba directamente a `users.repository.js`; ahora pasa por un service (como el resto de las entidades), para que ningún controller dependa de un repository.
+- Se mantiene intacta la arquitectura DAO/Repository de capas anteriores (ver sección "Arquitectura en capas" más abajo) y el manejo de errores centralizado, extendiendo ambos con la capa de DTO.
+- Ningún endpoint cambió de firma, de código de estado ni de forma de la respuesta exitosa; solo se reorganizó **de dónde** sale cada campo de esa respuesta.
+
+---
+
+## 🏗️ Arquitectura en capas
+
+La API separa responsabilidades en 5 capas, cada una con una única razón para cambiar. La regla general: **cada capa solo puede hablar con la capa inmediatamente debajo**; nunca se salta una capa hacia abajo (ej. un `controller` nunca llama a un `dao` ni importa un modelo de Mongoose).
+
+```
+Router → Controller → Service → Repository → DAO → Modelo (Mongoose)
+                 ↑
+               DTO (da forma a lo que el Controller devuelve)
+```
+
+| Capa | Carpeta | Responsabilidad | Lo que NO hace |
+| :--- | :--- | :--- | :--- |
+| **DAO** | `src/dao/` | Único lugar que importa los modelos de Mongoose (`User`, `Event`, `Ticket`) y ejecuta operaciones de base de datos (`findById`, `create`, `updateById`, `count`, agregaciones, etc.). | No conoce reglas de negocio ni permisos. |
+| **Repository** | `src/repositories/` | Intermediario orientado al dominio entre el `service` y el `dao` correspondiente (`findByEmail`, `findEvents`, `getOccupiedQuantity`, etc.). Solo importa su propio DAO. | No importa modelos de Mongoose directamente, no valida reglas de negocio. |
+| **Service** | `src/services/` | Concentra **toda** la lógica de negocio: validación de campos, control de cupos, duplicados, transiciones de estado válidas, permisos sobre recursos propios (dueño del evento/ticket vs. `admin`) y disparo de emails. Solo consume `repositories` (nunca `dao`s ni modelos). Da forma a la respuesta con los `dtos/`. | No sabe nada de `req`/`res` ni de códigos HTTP. |
+| **Controller** | `src/controllers/` | Solo coordina request/response: extrae datos de `req.body`/`req.params`/`req.query`, llama al `service` y devuelve la respuesta con el código de estado correspondiente. | No calcula cupos, no valida estados, no resuelve permisos, no importa modelos de Mongoose ni `dao`s. |
+| **DTO** | `src/dtos/` | Define qué campos de cada entidad (y de sus documentos poblados vía `populate`) se exponen al cliente. `password` nunca se incluye, ni siquiera hasheada. | No accede a la base de datos. |
+
+### DTOs existentes
+
+| DTO | Archivo | Uso |
+| :--- | :--- | :--- |
+| `toUserDTO` | `src/dtos/user.dto.js` | Usuario autenticado: `register`, `login` (vía Passport) y `GET /api/sessions/current`. Nunca incluye `password`. |
+| `toUserSummaryDTO` | `src/dtos/user.dto.js` | Usuario poblado dentro de un ticket (`GET /api/events/:eid/tickets`, vista del organizador). |
+| `toEventDTO` | `src/dtos/event.dto.js` | Respuestas de `GET/POST/PUT/PATCH /api/events...`. |
+| `toEventSummaryDTO` | `src/dtos/event.dto.js` | Evento poblado dentro de un ticket (`GET /api/tickets/my-tickets`). |
+| `toTicketDTO` | `src/dtos/ticket.dto.js` | Ticket recién creado o cancelado (sin populate). |
+| `toTicketWithEventDTO` / `toTicketWithUserDTO` | `src/dtos/ticket.dto.js` | Ticket con el documento relacionado poblado y filtrado por su propio DTO. |
+
+Ejemplo de la cadena completa para `GET /api/tickets/my-tickets`:
+`tickets.router.js` → `tickets.controller.js` (solo pide `req.user.id`) → `tickets.service.js::listMyTickets` (busca y aplica `toTicketWithEventDTO`) → `tickets.repository.js::getTicketsByUser` → `tickets.dao.js::findByUser` (el único que llama a `Ticket.find(...).populate('event', ...)`).
 
 ---
 
@@ -184,9 +218,13 @@ Colección `Ticket` (`src/models/Ticket.js`) que conecta a un `User` con un `Eve
 5. Debe haber cupo suficiente: `capacity - Σ quantity de tickets activos ≥ quantity solicitada`; si no, `400` con un mensaje que indica cuántos lugares quedan.
 6. Al cancelar: el ticket debe existir (`404`), pertenecer al solicitante o ser `admin` (`403`), y no estar ya cancelado (`400`).
 
-### 📧 Email de confirmación (Nodemailer)
+### 📧 Notificaciones por Email (Nodemailer)
 
-Al crear un ticket exitosamente, `tickets.service.js` envía un email de confirmación con Nodemailer a través de `src/utils/mailer.js`. Las credenciales SMTP se leen **siempre** de variables de entorno, nunca hardcodeadas:
+Tanto al **crear** como al **cancelar** un ticket, `tickets.service.js` envía una notificación por correo electrónico a través de `src/utils/mailer.js`:
+- **Confirmación de inscripción (`sendTicketConfirmationEmail`):** Informa el evento, fecha, cupos reservados y código de reserva.
+- **Cancelación de ticket (`sendTicketCancellationEmail`):** Informa la cancelación, lugares liberados y código del ticket.
+
+Las credenciales SMTP se leen **siempre** de variables de entorno, nunca hardcodeadas:
 
 | Variable | Descripción |
 | :--- | :--- |
@@ -196,7 +234,7 @@ Al crear un ticket exitosamente, `tickets.service.js` envía un email de confirm
 | `MAIL_PASS` | Contraseña o contraseña de aplicación |
 | `MAIL_FROM` | Remitente que verá el destinatario |
 
-El envío es **best effort**: si `MAIL_HOST`/`MAIL_USER`/`MAIL_PASS` no están configurados, o si el SMTP falla, el ticket queda creado igual (se loguea el error en consola) — una inscripción nunca debería fallar por un problema de mail.
+El envío es **best effort**: si `MAIL_HOST`/`MAIL_USER`/`MAIL_PASS` no están configurados, o si el SMTP falla, la operación de negocio (creación o cancelación) se completa igual (se loguea el error en consola) — un flujo de tickets nunca debería fallar por un problema de mail.
 
 ---
 
@@ -261,7 +299,8 @@ src/
 │   ├── events.service.js      # Lógica de negocio y validación de propiedad
 │   ├── events.service.test.js # Tests unitarios (node:test)
 │   ├── tickets.service.js     # Cupos, duplicados, cancelación y disparo del email
-│   └── tickets.service.test.js# Tests unitarios (node:test)
+│   ├── tickets.service.test.js# Tests unitarios (node:test)
+│   └── users.service.js       # Listado de usuarios (capa admin)
 ├── repositories/
 │   ├── events.repository.js
 │   ├── users.repository.js
@@ -270,6 +309,11 @@ src/
 │   ├── events.dao.js
 │   ├── users.dao.js
 │   └── tickets.dao.js
+├── dtos/
+│   ├── user.dto.js             # toUserDTO / toUserSummaryDTO (nunca password)
+│   ├── event.dto.js            # toEventDTO / toEventSummaryDTO
+│   ├── ticket.dto.js           # toTicketDTO / toTicketWithEventDTO / toTicketWithUserDTO
+│   └── dtos.test.js            # Tests: ningún DTO expone password, ni con populate (node:test)
 ├── models/
 │   ├── Event.js
 │   ├── Event.test.js           # Tests unitarios del esquema (node:test)
@@ -280,7 +324,8 @@ src/
     ├── jwt.js                 # jsonwebtoken
     ├── mailer.js              # Nodemailer: credenciales desde variables de entorno
     ├── AppError.js            # Error con statusCode para el error handler global
-    └── asyncHandler.js        # Envuelve controllers async, elimina try/catch repetido
+    ├── asyncHandler.js        # Envuelve controllers async, elimina try/catch repetido
+    └── isValidObjectId.js     # Wrapper de mongoose.isValidObjectId para que los services no importen mongoose
 ```
 
 ---
@@ -328,6 +373,14 @@ src/
 ---
 
 ## 🧪 Casos de prueba principales
+
+Casos verificados puntualmente para esta entrega (arquitectura en capas / DTOs):
+
+- **Flujo completo** registro → login → crear evento → inscribirse → consultar `my-tickets` → cancelar: cada paso devuelve el código esperado y el ticket final queda en `cancelled` con el cupo liberado.
+- `GET /api/sessions/current` responde con `toUserDTO` (`id`, `first_name`, `last_name`, `email`, `role`): **nunca** incluye `password`.
+- `GET /api/events/:eid/tickets` (ticket con `populate('user', ...)`) responde con `toTicketWithUserDTO`, que filtra el usuario relacionado con `toUserSummaryDTO`: **nunca** incluye `password`, ni siquiera hasheada.
+- Un error de negocio (evento sin cupo, inscripción duplicada, estado inválido) devuelve el código HTTP correcto (`400`/`409`) y nunca `500`.
+- Endpoint protegido sin cookie de sesión → `401`; con sesión pero sin el rol/propiedad requerida → `403`.
 
 | Prueba | Endpoint | Rol / Condición | Resultado esperado |
 | :--- | :--- | :--- | :--- |

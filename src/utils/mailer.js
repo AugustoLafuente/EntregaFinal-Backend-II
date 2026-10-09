@@ -67,7 +67,28 @@ export const sendTicketConfirmationEmail = async (to, { eventTitle, eventDate, q
     });
 };
 
+export const sendTicketCancellationEmail = async (to, { eventTitle, eventDate, quantity, reservationCode }) => {
+    const formattedDate = eventDate ? new Date(eventDate).toLocaleDateString('es-AR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    }) : null;
+
+    return sendMail({
+        to,
+        subject: `Cancelación de inscripción: ${eventTitle}`,
+        html: `
+            <h2>Tu inscripción fue cancelada</h2>
+            <p><strong>Evento:</strong> ${eventTitle}</p>
+            ${formattedDate ? `<p><strong>Fecha:</strong> ${formattedDate}</p>` : ''}
+            <p><strong>Cantidad de lugares liberados:</strong> ${quantity}</p>
+            <p><strong>Código de reserva:</strong> ${reservationCode}</p>
+        `
+    });
+};
+
 export default {
     sendMail,
-    sendTicketConfirmationEmail
+    sendTicketConfirmationEmail,
+    sendTicketCancellationEmail
 };

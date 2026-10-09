@@ -8,11 +8,12 @@
 import { signToken } from '../utils/jwt.js';
 import { config, COOKIE_NAME, COOKIE_MAX_AGE } from '../config/config.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { toUserDTO } from '../dtos/user.dto.js';
 
 export const register = asyncHandler(async (req, res) => {
     return res.status(201).json({
         status: 'success',
-        payload: req.user
+        payload: toUserDTO(req.user)
     });
 });
 
@@ -35,10 +36,9 @@ export const login = asyncHandler(async (req, res) => {
 });
 
 export const current = asyncHandler(async (req, res) => {
-    const { id, email, role } = req.user;
     return res.status(200).json({
         status: 'success',
-        payload: { id, email, role }
+        payload: toUserDTO(req.user)
     });
 });
 

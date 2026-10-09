@@ -2,7 +2,9 @@
  * Repository: intermediario entre el service y el DAO, aísla al resto
  * de la app de los detalles de persistencia (Mongoose).
  */
-import eventsDao from '../dao/events.dao.js';
+import eventsDao, { EVENT_STATUSES } from '../dao/events.dao.js';
+
+export { EVENT_STATUSES };
 
 export const createEvent = async (eventData) => {
     return eventsDao.create(eventData);
