@@ -1,9 +1,9 @@
 /**
  * Controlador para la gestión de Sesiones y Autenticación.
- * La validación de datos y credenciales vive en las estrategias de Passport
- * (src/config/passport.config.js); acá solo se genera el JWT, se setea la
- * cookie y se da forma a la respuesta. Cualquier error se delega al
- * middleware global de errores vía asyncHandler.
+ * La validación de datos y credenciales se delega a usersService
+ * (a través de las estrategias de Passport en src/config/passport.config.js);
+ * acá solo se genera el JWT, se setea la cookie y se da forma a la respuesta.
+ * Cualquier error se delega al middleware global de errores vía asyncHandler.
  */
 import { signToken } from '../utils/jwt.js';
 import { config, COOKIE_NAME, COOKIE_MAX_AGE } from '../config/config.js';

@@ -49,7 +49,7 @@ export const createTicket = async (eventId, user, requestedQuantity) => {
     const occupied = await ticketsRepository.getOccupiedQuantity(eventId);
     const available = event.capacity - occupied;
     if (available < quantity) {
-        throw new AppError(`No hay cupos suficientes disponibles (quedan ${Math.max(available, 0)})`, 400);
+        throw new AppError(`No hay cupos suficientes disponibles (quedan ${Math.max(available, 0)})`, 409);
     }
 
     const ticket = await ticketsRepository.createTicket({

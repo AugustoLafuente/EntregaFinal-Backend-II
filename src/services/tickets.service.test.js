@@ -120,7 +120,7 @@ describe('tickets.service - createTicket', () => {
         await assert.rejects(
             () => ticketsService.createTicket(new mongoose.Types.ObjectId().toString(), USER, 1),
             (error) => {
-                assert.equal(error.statusCode, 400);
+                assert.equal(error.statusCode, 409);
                 assert.match(error.message, /cupos/);
                 return true;
             }

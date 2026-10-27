@@ -1,13 +1,13 @@
-# Plataforma de Eventos Deportivos - Pre-entrega 8
+# Plataforma de Eventos Deportivos - Entrega Final
 
-Proyecto backend en Node.js y Express para la gestión e inscripción a eventos deportivos. Esta entrega **refactoriza la API a una arquitectura profesional en capas** (DAO → Repository → Service → Controller, con una capa de DTO para las respuestas), sin cambiar el comportamiento externo de ningún endpoint: el registro, login, CRUD de eventos, inscripciones, cupos, permisos y notificaciones siguen funcionando exactamente igual que en la pre-entrega 7.
+Proyecto backend en Node.js y Express para la gestión e inscripción a eventos deportivos. Esta **Entrega Final** presenta la versión completa e integrada de la API construida durante el curso, consolidando todas las funcionalidades (autenticación JWT con cookies httpOnly, Passport.js, control de roles y permisos, CRUD de eventos, tickets, cupos en tiempo real, notificaciones vía Nodemailer y manejo centralizado de errores) bajo una arquitectura profesional estricta por capas (**Controller → Service → Repository → DAO → Modelo de Mongoose**, con capa de **DTO** para modelar todas las respuestas).
 
-### ✅ Resumen de lo incorporado en esta entrega
+### ✅ Aspectos destacados de la Entrega Final
 
-- **Capa `dtos/`**: `user.dto.js`, `event.dto.js` y `ticket.dto.js` centralizan qué campos de cada entidad se exponen en las respuestas. Reemplazan los mapeos que antes estaban duplicados dentro de cada `service` (y en `passport.config.js` para el usuario). `password` nunca se expone, tampoco cuando el documento viene con `populate`.
-- **`users.service.js`**: antes `users.controller.js` llamaba directamente a `users.repository.js`; ahora pasa por un service (como el resto de las entidades), para que ningún controller dependa de un repository.
-- Se mantiene intacta la arquitectura DAO/Repository de capas anteriores (ver sección "Arquitectura en capas" más abajo) y el manejo de errores centralizado, extendiendo ambos con la capa de DTO.
-- Ningún endpoint cambió de firma, de código de estado ni de forma de la respuesta exitosa; solo se reorganizó **de dónde** sale cada campo de esa respuesta.
+- **Arquitectura en capas completa y desacoplada**: Cada capa tiene una única responsabilidad. Los modelos de Mongoose únicamente se importan en los DAOs. Los Controllers y Passport únicamente consumen Services. Los Services consumen Repositories.
+- **Autenticación e inicio de sesión por Service**: Registro y login canalizados desde Passport a través de `users.service.js`, garantizando que la lógica de negocio y validaciones residan exclusivamente en la capa de servicios.
+- **Capa de DTOs (`src/dtos/`)**: `user.dto.js`, `event.dto.js` y `ticket.dto.js` aseguran que ningún endpoint exponga información sensible (la contraseña nunca se devuelve, ni siquiera hasheada ni en documentos poblados).
+- **Manejo uniforme de errores**: Códigos de estado HTTP precisos (`200`, `201`, `400`, `401`, `403`, `404`, `409`, `500`) manejados centralizadamente mediante `AppError` y middleware global.
 
 ---
 
@@ -60,7 +60,51 @@ Ejemplo de la cadena completa para `GET /api/tickets/my-tickets`:
 El modelo `User` maneja 3 roles posibles: `user` (por defecto), `organizer` y `admin`.
 
 - **Registro público (`POST /api/sessions/register`):** Todo usuario nuevo se crea obligatoriamente con rol `user`. El endpoint ignora cualquier campo `role` enviado en el body para evitar que alguien se auto-asigne permisos de admin u organizer.
-- **Asignación de roles con privilegios:** Los roles `organizer` o `admin` se asignan manualmente en la base de datos.
+- **Asignación de roles con privilegios:** Los roles `organizer` o `admin` se asignan manualmente en la base de datos, ya que no hay (ni debe haber) un endpoint público para auto-asignarlos.
+
+### 🧪 Cómo crear usuarios de prueba (`organizer` / `admin`)
+
+1. Registrar el usuario normalmente (queda con rol `user`):
+   ```bash
+   curl -X POST http://localhost:8080/api/sessions/register \
+     -H "Content-Type: application/json" \
+     -d '{
+       "first_name": "Ana",
+       "last_name": "Gomez",
+       "email": "organizer@example.com",
+       "password": "password123"
+     }'
+   ```
+2. Conectarse a la base con `mongosh` (usando la misma `MONGO_URL` del `.env`) y actualizar su rol manualmente:
+   ```js
+   // mongosh "mongodb://localhost:27017/tu_base_de_datos"
+   db.users.updateOne(
+     { email: "organizer@example.com" },
+     { $set: { role: "organizer" } } // o "admin"
+   )
+   ```
+3. Volver a loguearse (`POST /api/sessions/login`) para obtener una cookie con el JWT que ya refleja el nuevo rol (el JWT se firma en el login, no en el registro).
+
+### 🔑 Flujo de autenticación con cookies (curl)
+
+Usando `-c cookies.txt -b cookies.txt` para persistir la cookie `currentUser` entre llamadas, como haría un browser:
+
+```bash
+# 1. Login (la respuesta setea la cookie httpOnly con el JWT)
+curl -X POST http://localhost:8080/api/sessions/login \
+  -H "Content-Type: application/json" \
+  -c cookies.txt \
+  -d '{ "email": "organizer@example.com", "password": "password123" }'
+
+# 2. Usuario actual (reenvía la cookie guardada)
+curl http://localhost:8080/api/sessions/current -b cookies.txt
+
+# 3. Logout (limpia la cookie)
+curl -X POST http://localhost:8080/api/sessions/logout -b cookies.txt -c cookies.txt
+
+# 4. /current después de logout -> 401 Unauthorized
+curl -i http://localhost:8080/api/sessions/current -b cookies.txt
+```
 
 ---
 
@@ -215,7 +259,7 @@ Colección `Ticket` (`src/models/Ticket.js`) que conecta a un `User` con un `Eve
 2. El evento debe estar `published` (si está `cancelled` o `finished` responde `400` con un mensaje específico para cada caso).
 3. `quantity` debe ser un entero `> 0`.
 4. El usuario no puede tener ya un ticket activo (`confirmed`/`pending`) para ese evento (`409 Conflict`).
-5. Debe haber cupo suficiente: `capacity - Σ quantity de tickets activos ≥ quantity solicitada`; si no, `400` con un mensaje que indica cuántos lugares quedan.
+5. Debe haber cupo suficiente: `capacity - Σ quantity de tickets activos ≥ quantity solicitada`; si no, `409 Conflict` con un mensaje que indica cuántos lugares quedan.
 6. Al cancelar: el ticket debe existir (`404`), pertenecer al solicitante o ser `admin` (`403`), y no estar ya cancelado (`400`).
 
 ### 📧 Notificaciones por Email (Nodemailer)
@@ -268,6 +312,8 @@ npm test
 - **`src/models/Event.test.js`**: valida el esquema de Mongoose de forma aislada (`validateSync()`, sin conexión a base de datos): campos obligatorios, `capacity > 0`, `price >= 0`, enum de `status` y el default `draft`.
 - **`src/services/events.service.test.js`**: testea las reglas de negocio de `events.service.js` mockeando `eventsRepository` con `t.mock.method` (sin tocar MongoDB): fecha pasada al crear y al actualizar (incluye el caso del bug corregido), `capacity`/`price` inválidos, estado `cancelled` como terminal, propiedad del recurso (`organizer` vs `admin`), transiciones de `status` inválidas y la forma de la respuesta paginada de `listEvents`.
 - **`src/services/tickets.service.test.js`**: testea `tickets.service.js` mockeando `ticketsRepository`, `eventsRepository` y el mailer: evento inexistente/cancelado/finalizado/no publicado, `quantity` inválida, inscripción duplicada, cupo insuficiente (y que los `cancelled` no cuenten), que el email sea best-effort (un fallo de SMTP no rompe la creación del ticket), propiedad del ticket al cancelar y permisos para ver los tickets de un evento.
+- **`src/services/users.service.test.js`**: testea `users.service.js` mockeando `usersRepository`: validación de campos obligatorios, formato de email, longitud mínima de password, duplicados (409), credenciales de login válidas e inválidas, y listado de usuarios sanitizado.
+- **`src/dtos/dtos.test.js`**: valida exhaustivamente que ningún DTO exponga `password` bajo ninguna circunstancia, incluso con documentos parcialmente poblados.
 
 ---
 
@@ -300,7 +346,8 @@ src/
 │   ├── events.service.test.js # Tests unitarios (node:test)
 │   ├── tickets.service.js     # Cupos, duplicados, cancelación y disparo del email
 │   ├── tickets.service.test.js# Tests unitarios (node:test)
-│   └── users.service.js       # Listado de usuarios (capa admin)
+│   ├── users.service.js       # Registro, validación de credenciales y listado de usuarios
+│   └── users.service.test.js  # Tests unitarios de users.service (node:test)
 ├── repositories/
 │   ├── events.repository.js
 │   ├── users.repository.js
@@ -408,7 +455,7 @@ Casos verificados puntualmente para esta entrega (arquitectura en capas / DTOs):
 | Inscripción sin sesión | `POST /api/events/:eid/tickets` | Sin cookie | `401 Unauthorized` |
 | Inscripción a evento inexistente | `POST /api/events/:eid/tickets` | Id inexistente o inválido | `404 Not Found` |
 | Inscripción a evento cancelado/finalizado/en borrador | `POST /api/events/:eid/tickets` | Evento no `published` | `400 Bad Request` (mensaje específico por estado) |
-| Inscripción sin cupo suficiente | `POST /api/events/:eid/tickets` | `capacity` ya ocupada por tickets activos | `400 Bad Request` con cupos restantes en el mensaje |
+| Inscripción sin cupo suficiente | `POST /api/events/:eid/tickets` | `capacity` ya ocupada por tickets activos | `409 Conflict` con cupos restantes en el mensaje |
 | Inscripción duplicada activa | `POST /api/events/:eid/tickets` | Ya tiene un ticket `confirmed`/`pending` para ese evento | `409 Conflict` |
 | Cancelación propia | `PATCH /api/tickets/:tid/cancel` | Dueño del ticket | `200 OK`, cupo liberado (nueva inscripción por ese lugar funciona) |
 | Cancelación de ticket ajeno | `PATCH /api/tickets/:tid/cancel` | Rol `user`, no es el dueño | `403 Forbidden` |

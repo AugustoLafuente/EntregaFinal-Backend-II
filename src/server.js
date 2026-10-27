@@ -8,10 +8,7 @@ const startServer = async () => {
     try {
         await connectDB();
         app.listen(PORT, () => {
-            console.log(` Servidor escuchando en el puerto ${PORT}`);
-            console.log(` Entorno: ${config.nodeEnv}`);
-            console.log(` Health check: http://localhost:${PORT}/api/health`);
-            console.log(` Events endpoint: http://localhost:${PORT}/api/events`);
+            console.log(`Servidor escuchando en el puerto ${PORT} (entorno: ${config.nodeEnv})`);
         });
     } catch (error) {
         console.error(' Error al conectar con MongoDB:', error.message);
