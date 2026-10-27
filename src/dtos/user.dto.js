@@ -7,7 +7,7 @@ export const toUserDTO = (user) => {
     if (!user) return null;
 
     return {
-        id: user._id ?? user.id,
+        id: (user._id ?? user.id)?.toString(),
         first_name: user.first_name,
         last_name: user.last_name,
         email: user.email,
@@ -22,7 +22,7 @@ export const toUserSummaryDTO = (user) => {
     if (!user) return null;
 
     return {
-        id: user._id ?? user.id,
+        id: (user._id ?? user.id)?.toString(),
         first_name: user.first_name,
         last_name: user.last_name,
         email: user.email

@@ -6,6 +6,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import mongoose from 'mongoose';
 import { toUserDTO, toUserSummaryDTO } from './user.dto.js';
 import { toEventDTO, toEventSummaryDTO } from './event.dto.js';
 import { toTicketDTO, toTicketWithEventDTO, toTicketWithUserDTO } from './ticket.dto.js';
@@ -36,6 +37,19 @@ describe('user.dto', () => {
 
     test('toUserDTO con null devuelve null', () => {
         assert.equal(toUserDTO(null), null);
+    });
+
+    // Regresión: un documento de Mongoose trae _id como instancia de ObjectId,
+    // no como string. Si toUserDTO no lo convierte, req.user.id queda como
+    // ObjectId y comparaciones como `event.organizer.toString() === user.id`
+    // en events.service/tickets.service fallan siempre (403/404 falsos para
+    // el propio dueño del recurso).
+    test('toUserDTO convierte un _id de Mongoose (ObjectId) a string plano', () => {
+        const objectId = new mongoose.Types.ObjectId();
+        const dto = toUserDTO({ _id: objectId, email: 'ana@mail.com', role: 'organizer' });
+        assert.equal(typeof dto.id, 'string');
+        assert.equal(dto.id, objectId.toString());
+        assert.equal(objectId.toString() === dto.id, true);
     });
 
     test('toUserSummaryDTO nunca incluye password', () => {
